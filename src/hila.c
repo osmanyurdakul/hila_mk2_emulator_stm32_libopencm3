@@ -58,11 +58,12 @@ uint8_t hila_disch_time             = HILA_DISCHARGE_TIME;
 uint8_t hila_laser_temp             = HILA_TEMPERATURE;
 uint8_t hila_lifetime_eol           = 0;
 bool hila_error_flag                = false;
-
-
 bool hila_diag_isEnabled            = false;
-
 int hila_diag_delay                 = -1;
+int hila_sdc_counter                = 0;
+int hila_critical_err_counter       = 0;
+
+
 
 static void hila_sysclk_setup(void)
 {
@@ -131,7 +132,8 @@ static void sdc(char* response)
             hila_setpoint_register = ftoa_1dec(setpoint, str);
         }
         sprintf(response, "SDC: %s\r", str); 
-    } 
+    }
+    hila_sdc_counter++; 
 }
 
 static void rcs(char* response)
@@ -144,7 +146,7 @@ static void rcs(char* response)
 static void emoff(char* response)
 {
     hila_status_register &= ~HILA_STA_EMISSION;
-    sprintf(response, "EMOFF");
+    sprintf(response, "EMOFF\r");
 }
 
 static void emon(char* response)
@@ -195,6 +197,7 @@ static void ricdt(char* response)
     if (hila_disch_time > 50)
     {
         hila_status_register |= HILA_STA_CRITICAL_ERR; // status register critical error, discharge time is longer than it should be.
+        hila_critical_err_counter++;
     }
     else
     {
@@ -238,15 +241,116 @@ static void rop(char* response)
     }
 }
 
+static void rpp(char* response)
+{
+    char str[8];
+    if (hila_output_power_register < HILA_OUTPUT_OFF)
+    {
+        sprintf(response, "RPP: Off\r");
+    }
+    else if (hila_output_power_register < HILA_OUTPUT_LOW)
+    {
+        sprintf(response, "RPP: Low\r");
+    }
+    else
+    {
+        if (hila_output_power_register < 9.995f) 
+        {
+            (void)ftoa_2dec(hila_output_power_register, str);
+        } 
+        else 
+        {
+            (void)ftoa_1dec(hila_output_power_register, str);
+        }
+        sprintf(response, "RPP: %s\r", str);
+    }
+}
+
+static void rnc(char* response)
+{
+    char str[8];
+    (void)ftoa_1dec(reg_setpoint_min, str);
+    sprintf(response, "RNC: %s\r", str); 
+}
+
 static void sta(char* response)
 {
     sprintf(response, "STA: %d\r", (int)hila_status_register); 
 }
 
+static void dle(char* response)
+{
+    if (!(hila_status_register & HILA_STA_EMISSION))
+    {
+        sprintf(response, "DLE\r");
+        // hila_status_register |= HILA_STA_MODULATION;
+    }
+    else
+    {
+        sprintf(response, "ERR: Emission ON!\r");
+    }
+}
+
+static void dgm(char* response)
+{
+    if (!(hila_status_register & HILA_STA_EMISSION))
+    {
+        sprintf(response, "DGM\r");
+        // hila_status_register |= HILA_STA_MODULATION;
+    }
+    else
+    {
+        sprintf(response, "ERR: Emission ON!\r");
+    }
+}
+
+static void dec(char* response)
+{
+    if (!(hila_status_register & HILA_STA_EMISSION))
+    {
+        sprintf(response, "DEC\r");
+        // hila_status_register |= HILA_STA_MODULATION;
+    }
+    else
+    {
+        sprintf(response, "ERR: Emission ON!\r");
+    }
+}
+
+static void edc(char* response)
+{
+    if (!(hila_status_register & HILA_STA_EMISSION))
+    {
+        sprintf(response, "EDC\r");
+        // hila_status_register |= HILA_STA_MODULATION;
+    }
+    else
+    {
+        sprintf(response, "ERR: Emission ON!\r");
+    }
+}
+
+static void ret(char* response)
+{
+    sprintf(response, "RET: %d\r", hila_sdc_counter); 
+}
+
+static void rec(char* response)
+{
+    sprintf(response, "REC: %d\r", hila_critical_err_counter); 
+}
+
+static void rsn(char* response)
+{
+    sprintf(response, "RSN: %s\r", HILA_MK2_SERIAL_NUM); 
+}
+
+
 static void bcmd(char* response)
 {
-    sprintf(response, "BCDM\r");
+    sprintf(response, "BCMD\r");
 }
+
 
 // diag functions
 static void run(void)
@@ -360,12 +464,13 @@ static uint8_t hila_get_vp24v_status(void)
 //     }
 // }
 
+/*
 static void hila_delay_setup(void)
 {
-    /*
-    *   1- Enable clock for timer2 peripheral
-        2- set prescaler such that timer frequency is 1 MHz
-    */
+    
+        // 1- Enable clock for timer2 peripheral
+        // 2- set prescaler such that timer frequency is 1 MHz
+    
     rcc_periph_clock_enable(RCC_TIM2);
     timer_set_prescaler(TIM2, PRESCALER);
 }
@@ -378,6 +483,7 @@ static void hila_delay_us(uint32_t duration)
     while(timer_get_flag(TIM2, TIM_SR_UIF) == 0);
     timer_clear_flag(TIM2, TIM_SR_UIF);
 }
+*/
 
 static void hila_diag_delay_timer_setup(void)
 {
@@ -499,6 +605,8 @@ static void hila_diag_putc(char ch)
     usart_send_blocking(USART2, ch);
 }
 
+
+/*This function is redirect hila diag serial port to printf function*/
 int _write(int file, char *ptr, int len)
 {
 	int i;
@@ -591,7 +699,7 @@ void hila_initialize(void)
 {
     hila_sysclk_setup();
     hila_io_initialize();
-    hila_delay_setup();
+    // hila_delay_setup();
     hila_rs485_initialize(RS485_BAUDRATE);
     hila_diag_initialize(DIAG_BAUDRATE);
     hila_test_initialize();
@@ -696,6 +804,42 @@ void hila_rs485_cmd_execute(void)
     else if(!strcmp((const char*)rs485_command, "RICDT"))
     {
         ricdt(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "DGM"))
+    {
+        dgm(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "DLE"))
+    {
+        dle(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "RNC"))
+    {
+        rnc(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "RPP"))
+    {
+        rpp(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "RSN"))
+    {
+        rsn(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "REC"))
+    {
+        rec(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "RET"))
+    {
+        ret(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "EDC"))
+    {
+        edc(rs485_resp_buffer);
+    }
+    else if(!strcmp((const char*)rs485_command, "DEC"))
+    {
+        dec(rs485_resp_buffer);
     }
     else
     {
@@ -848,6 +992,7 @@ void hila_test_cmd_execute(void)
         {
             hila_lifetime_eol = 2;
             hila_status_register |= HILA_STA_CRITICAL_ERR;
+            hila_critical_err_counter++;
         }
     }
 
@@ -861,13 +1006,13 @@ static void hila_handle_led(void)
 {
     if ((hila_status_register & HILA_STA_EMISSION) == HILA_STA_EMISSION)
     {
-        hila_set_ready_led(1); // hila is ready
-        hila_set_emission_led(1);   // emission is on
+        hila_set_ready_led(0); // hila is ready
+        hila_set_emission_led(0);   // emission is on
     }
     else if ((hila_status_register & HILA_STA_NOPOWER) == HILA_STA_NOPOWER)
     {
-        hila_set_ready_led(0); // hila is not ready
-        hila_set_emission_led(0);   // emission is off
+        hila_set_ready_led(1); // hila is not ready
+        hila_set_emission_led(1);   // emission is off
         if (hila_error_flag == true)
         {
             hila_set_error_led(1); // error led turns to red
@@ -875,9 +1020,9 @@ static void hila_handle_led(void)
     }
     else
     {
-        hila_set_ready_led(1); // hila is ready
+        hila_set_ready_led(0); // hila is ready
         hila_set_error_led(0);  // no error
-        hila_set_emission_led(0);   // emission is off
+        hila_set_emission_led(1);   // emission is off
     }
 }
 

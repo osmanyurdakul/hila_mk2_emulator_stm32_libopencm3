@@ -12,13 +12,13 @@
 #define TEST_BUF_SIZE   32
 #define DIAG_BUF_SIZE   32
 
-#define HILA_REG_SETPOINT_MIN 12.0
+#define HILA_REG_SETPOINT_MIN 10.0
 #define HILA_TEMPERATURE      25
-#define HILA_TEMPERATURE_WAR  50
-#define HILA_TEMPERATURE_ERR  55       
+#define HILA_TEMPERATURE_WAR  48
+#define HILA_TEMPERATURE_ERR  50       
 
 #define HILA_MK2_MODEL_NUM  "YLM-50-ASML\r"
-#define HILA_MK2_FW_VERSION ""
+#define HILA_MK2_SERIAL_NUM "12345678\r"
 
 // hila status register bit definitions
 #define HILA_STA_CMD_BUFFER_OVF (1 << 0)    // 1
@@ -47,7 +47,7 @@
 #define HILA_DISCHARGE_TIME 25 // hila discharge time must be below 50 ms
 
 
-#define HILA_ID  6
+#define HILA_ID  0
 
 
 // MHCB2 - HILA communication functions
