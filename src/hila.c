@@ -469,8 +469,8 @@ static uint8_t hila_get_vp24v_status(void)
 static void hila_rs485_timeout_setup(void)
 {  
     rcc_periph_clock_enable(RCC_TIM2);
-    timer_set_prescaler(TIM2, 41999); // 1kHz timer freq
-    timer_set_period(TIM2, 100); // sets the period to 2 ms.
+    timer_set_prescaler(TIM2, 41); // 1MHz timer freq --> 42 MHz / 41 + 1 = 1MHz
+    timer_set_period(TIM2, 2500); // sets the period to 2.5 ms.
     
     // enable global interrupts
     nvic_enable_irq(NVIC_TIM2_IRQ);
