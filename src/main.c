@@ -18,12 +18,6 @@ int main(void)
             hila_cmd_isReceived = false;
         }
 
-        if (diag_cmd_isReceived == true)
-        {
-            hila_diag_cmd_execute();
-            diag_cmd_isReceived = false;
-        }
-
         if (test_cmd_isReceived == true)
         {
             hila_test_cmd_execute();

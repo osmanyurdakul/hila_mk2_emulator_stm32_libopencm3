@@ -63,7 +63,8 @@ int hila_diag_delay                 = -1;
 int hila_sdc_counter                = 0;
 int hila_critical_err_counter       = 0;
 
-
+bool hila_timeout_flag              = false;
+uint32_t hila_timeout_counter       = 0;
 
 static void hila_sysclk_setup(void)
 {
@@ -464,34 +465,28 @@ static uint8_t hila_get_vp24v_status(void)
 //     }
 // }
 
-/*
-static void hila_delay_setup(void)
-{
-    
-        // 1- Enable clock for timer2 peripheral
-        // 2- set prescaler such that timer frequency is 1 MHz
-    
-    rcc_periph_clock_enable(RCC_TIM2);
-    timer_set_prescaler(TIM2, PRESCALER);
-}
 
-static void hila_delay_us(uint32_t duration)
-{
-    timer_set_period(TIM2, duration*2);
-    timer_set_counter(TIM2, 0);
-    timer_enable_counter(TIM2);
-    while(timer_get_flag(TIM2, TIM_SR_UIF) == 0);
-    timer_clear_flag(TIM2, TIM_SR_UIF);
+static void hila_rs485_timeout_setup(void)
+{  
+    rcc_periph_clock_enable(RCC_TIM2);
+    timer_set_prescaler(TIM2, 41999); // 1kHz timer freq
+    timer_set_period(TIM2, 100); // sets the period to 2 ms.
+    
+    // enable global interrupts
+    nvic_enable_irq(NVIC_TIM2_IRQ);
+    nvic_set_priority(NVIC_TIM2_IRQ, 2);
+
+    timer_disable_irq(TIM2, TIM_DIER_UIE);
+    timer_disable_counter(TIM2);
 }
-*/
 
 static void hila_diag_delay_timer_setup(void)
 {
     rcc_periph_clock_enable(RCC_TIM5);
     timer_set_prescaler(TIM5, 41999); // 1kHz timer freq
-    timer_set_period(TIM5, 200); // sets the period to 200 ms. 100 ms ON and 100 ms OFF
+    timer_set_period(TIM5, 200); // sets the period to 100 ms.
     timer_enable_irq(TIM5, TIM_DIER_UIE);
-    timer_enable_counter(TIM5);
+    timer_enable_counter(TIM5); 
 }
 
 static void hila_diag_delay_nvic(void)
@@ -523,10 +518,11 @@ static void hila_rs485_initialize(uint32_t baud)
     usart_set_mode(USART1, USART_MODE_TX_RX);
     // enable rx interrupt:
     usart_enable_rx_interrupt(USART1);
-    // enable usart module
-    usart_enable(USART1);
     // set direction to reception by setting DE low
     hila_set_rs485_direction(0);
+    // enable usart module
+    usart_enable(USART1);
+    
 }
 
 static void hila_rs485_nvic_setup(void)
@@ -550,20 +546,18 @@ void hila_rs485_puts(char *text)
     uint8_t length;
     length = strlen(text);
     uint8_t text_idx;
-    // if it is the first byte that wait for TXE = 1 and switch the direction to transmitter
-    while(!usart_get_flag(USART1, USART_SR_TXE));
     hila_set_rs485_direction(1); // switch to transmitter mode
-    usart_send(USART1, text[0]);
-    // send data until the byte before the last byte
-    for(text_idx = 1; text_idx < length - 1; text_idx++)
+    // start sending data
+    for(text_idx = 0; text_idx < length; text_idx++)
     {
         while(!usart_get_flag(USART1, USART_SR_TXE));
         usart_send(USART1, text[text_idx]);
     }
-    // if it is the last byte to send, send data enable TC interrupt and switch direction to receiver mode in transmission complete (TC) interrupt function.
-    while(!usart_get_flag(USART1, USART_SR_TXE));
-    usart_send(USART1, text[length-1]); 
-    USART1_CR1 |= USART_CR1_TCIE;
+    //// enable TC interrupt and in ISR function set direction to low to switch to RX mode.
+    // USART1_CR1 |= USART_CR1_TCIE;
+    // wait until the last bit (stop bit) is sent and then set DE/nRE to low which means receive enabled again
+    while(!usart_get_flag(USART1, USART_SR_TC));
+    hila_set_rs485_direction(0); 
 }
 
 static void hila_diag_initialize(uint32_t baud)
@@ -586,19 +580,19 @@ static void hila_diag_initialize(uint32_t baud)
     usart_set_stopbits(USART2, USART_STOPBITS_1);
     usart_set_flow_control(USART2, USART_FLOWCONTROL_NONE);
     usart_set_parity(USART2, USART_PARITY_NONE);
-    // enable tx and rx 
-    usart_set_mode(USART2, USART_MODE_TX_RX);
-    // enable rx interrupt
-    usart_enable_rx_interrupt(USART2);
+    // enable tx only
+    usart_set_mode(USART2, USART_MODE_TX);
+    // // enable rx interrupt
+    // usart_enable_rx_interrupt(USART2);
     // enable usart module
     usart_enable(USART2);
 }
 
-static void hila_diag_nvic_setup(void)
-{
-    nvic_enable_irq(NVIC_USART2_IRQ);
-    nvic_set_priority(NVIC_USART2_IRQ, 2);
-}
+// static void hila_diag_nvic_setup(void)
+// {
+//     nvic_enable_irq(NVIC_USART2_IRQ);
+//     nvic_set_priority(NVIC_USART2_IRQ, 2);
+// }
 
 static void hila_diag_putc(char ch)
 {
@@ -698,8 +692,9 @@ static void hila_test_puts(char* text)
 void hila_initialize(void)
 {
     hila_sysclk_setup();
-    hila_io_initialize();
-    // hila_delay_setup();
+    hila_rs485_timeout_setup();
+
+    hila_io_initialize();    
     hila_rs485_initialize(RS485_BAUDRATE);
     hila_diag_initialize(DIAG_BAUDRATE);
     hila_test_initialize();
@@ -709,13 +704,13 @@ void hila_initialize(void)
     hila_diag_delay_timer_setup();
     hila_diag_delay_nvic();
     hila_rs485_nvic_setup();
-    hila_diag_nvic_setup();
+    // hila_diag_nvic_setup();
     hila_test_nvic_setup();
 }
 
 // static void hila_rs485_cmd_buf_flush(void)
 // {
-//     memset(rs485_cmd_buffer, '\0', RS485_BUF_SIZE);
+//     memset((char)rs485_cmd_buffer, '\0', RS485_BUF_SIZE);
 // }
 
 static void hila_rs485_resp_buf_flush(void)
@@ -845,13 +840,9 @@ void hila_rs485_cmd_execute(void)
     {
         bcmd(rs485_resp_buffer);
     }
-    // hila_rs485_cmd_buf_flush(); // clear buffer
 
     hila_rs485_puts(rs485_resp_buffer);
-    hila_diag_puts(rs485_resp_buffer);
-    hila_diag_resp_buf_flush();
     hila_rs485_resp_buf_flush();
-    rs485_cmd_idx = 0;
     rs485_cmd_buffer[0] = 0;
     rs485_cmd_isOverflow = false;
 }
@@ -1076,6 +1067,24 @@ void hila_io_handle(void)
     hila_handle_led();
     hila_handle_psu_status();
     hila_calc_output_power();
+    if (hila_timeout_flag == true)
+    {
+        hila_timeout_flag = false;
+        printf("HILA Timeout counter = %lu\r\n", hila_timeout_counter);
+    }
+}
+
+void tim2_isr(void)
+{
+    /* So, once timeout expires, disable counter and interrupt, increase counter by 1 and set timeout flag to true */
+    timer_disable_counter(TIM2);
+    timer_clear_flag(TIM2, TIM_SR_UIF); // clear timer interrupt flag to be able to receive new interrupts
+    timer_disable_irq(TIM2, TIM_DIER_UIE);
+
+    hila_timeout_flag = true;
+    hila_timeout_counter++;
+
+    rs485_cmd_idx = 0;
 }
 
 void tim5_isr(void)
@@ -1084,19 +1093,20 @@ void tim5_isr(void)
     gpio_toggle(GPIOA, GPIO5);
 
     hila_io_handle();
-    
 }
 
 void usart1_isr(void)
 {   
     if (usart_get_flag(USART1, USART_SR_RXNE) == 1)
     {
-        rs485_cmd_buffer[rs485_cmd_idx] = toupper((char)usart_recv(USART1));
+        rs485_cmd_buffer[rs485_cmd_idx] = (char)usart_recv(USART1);
         if (rs485_cmd_buffer[rs485_cmd_idx] == '\r')
         {
+            timer_disable_counter(TIM2);
+            timer_disable_irq(TIM2, TIM_DIER_UIE);
             hila_cmd_isReceived = true;
             rs485_cmd_buffer[rs485_cmd_idx] = '\0';
-
+            rs485_cmd_idx = 0;
             if (rs485_cmd_isOverflow == true)
             {
                 rs485_cmd_buffer[0] = '\0';
@@ -1105,6 +1115,9 @@ void usart1_isr(void)
         }
         else
         {
+            timer_set_counter(TIM2, 0);
+            timer_enable_irq(TIM2, TIM_DIER_UIE);
+            timer_enable_counter(TIM2);
             rs485_cmd_idx++;
             if (rs485_cmd_idx >= RS485_BUF_SIZE)
             {
@@ -1114,45 +1127,46 @@ void usart1_isr(void)
         }
     }
 
-    if(usart_get_flag(USART1, USART_SR_TC) == 1)
-    {
-        USART1_CR1 &= ~(USART_CR1_TCIE);
-        hila_set_rs485_direction(0);
-    }   
+    // if(usart_get_flag(USART1, USART_SR_TC) == 1)
+    // {
+    //     USART1_CR1 &= ~(USART_CR1_TCIE);
+    //     hila_set_rs485_direction(0);
+    // }   
 }
 
-void usart2_isr(void)
-{   
-    if (usart_get_flag(USART2, USART_SR_RXNE) == 1)
-    {
-        diag_cmd_buffer[diag_cmd_idx] = toupper((char)usart_recv(USART2));
-        if (diag_cmd_buffer[diag_cmd_idx] == '\r')
-        {
-            diag_cmd_isReceived = true;
-            diag_cmd_buffer[diag_cmd_idx] = '\0';
+// void usart2_isr(void)
+// {   
+//     if (usart_get_flag(USART2, USART_SR_RXNE) == 1)
+//     {
+//         diag_cmd_buffer[diag_cmd_idx] = toupper((char)usart_recv(USART2));
+//         if (diag_cmd_buffer[diag_cmd_idx] == '\r')
+//         {
+//             diag_cmd_isReceived = true;
+//             diag_cmd_buffer[diag_cmd_idx] = '\0';
+//             rs485_cmd_idx = 0;
 
-            if (diag_cmd_isOverflow == true)
-            {
-                diag_cmd_buffer[0] = '\0';
-            }
-        }
-        else
-        {
-            diag_cmd_idx++;
-            if (diag_cmd_idx >= DIAG_BUF_SIZE)
-            {
-                diag_cmd_idx = DIAG_BUF_SIZE - 1;
-                diag_cmd_isOverflow = true;
-            }
-        }
-    }   
-}
+//             if (diag_cmd_isOverflow == true)
+//             {
+//                 diag_cmd_buffer[0] = '\0';
+//             }
+//         }
+//         else
+//         {
+//             diag_cmd_idx++;
+//             if (diag_cmd_idx >= DIAG_BUF_SIZE)
+//             {
+//                 diag_cmd_idx = DIAG_BUF_SIZE - 1;
+//                 diag_cmd_isOverflow = true;
+//             }
+//         }
+//     }   
+// }
 
 void usart3_isr(void)
 {   
     if (usart_get_flag(USART3, USART_SR_RXNE) == 1)
     {
-        test_cmd_buffer[test_cmd_idx] = toupper((char)usart_recv(USART3));
+        test_cmd_buffer[test_cmd_idx] = (char)usart_recv(USART3);
         if (test_cmd_buffer[test_cmd_idx] == '\r')
         {
             test_cmd_isReceived = true;
