@@ -7,18 +7,26 @@ extern volatile bool test_cmd_isReceived;
 
 int main(void)
 {
-    hila_initialize();
+     hila_initialize();
+    
     
     while(1)
     {
+        // test_func();
 
         if (hila_cmd_isReceived == true)
         {
-            hila_rs485_cmd_execute();
             hila_cmd_isReceived = false;
+            hila_rs485_cmd_execute();
         }
 
-        if (test_cmd_isReceived == true)
+        // else if (diag_cmd_isReceived == true)
+        // {
+        //     hila_diag_cmd_execute();
+        //     diag_cmd_isReceived = false;
+        // }
+
+        else if (test_cmd_isReceived == true)
         {
             hila_test_cmd_execute();
             test_cmd_isReceived = false;

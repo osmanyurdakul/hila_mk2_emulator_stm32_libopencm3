@@ -5,7 +5,6 @@
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/nvic.h>
-#include <libopencm3/cm3/systick.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -80,10 +79,6 @@ static void hila_calc_output_power(void)
     float output_power;
     output_power = HILA_COEFF_A * hila_setpoint_register + HILA_COEFF_B;
 
-    if ( output_power <= 0.0) {
-        output_power = 0.0;
-    }
-
     if (hila_lifetime_eol == 0) // no end of life error/warning
     {
         if (hila_status_register & HILA_STA_EMISSION)
@@ -143,7 +138,6 @@ static void sdc(char* response)
         sprintf(response, "SDC: %s\r", str); 
     }
     hila_sdc_counter++; 
-    hila_calc_output_power();
 }
 
 static void rcs(char* response)
@@ -348,16 +342,15 @@ static void edc(char* response)
 
 static void rmec(char* response)
 {
-    sprintf(response, "RMEC: 0\r");
-    // if (!(hila_status_register & HILA_STA_EMISSION))
-    // {
-    //     sprintf(response, "RMEC: 0\r");
-    //     // hila_status_register |= HILA_STA_MODULATION;
-    // }
-    // else
-    // {
-    //     sprintf(response, "ERR: Emission ON!\r");
-    // }
+    if (!(hila_status_register & HILA_STA_EMISSION))
+    {
+        sprintf(response, "RMEC: 0\r");
+        // hila_status_register |= HILA_STA_MODULATION;
+    }
+    else
+    {
+        sprintf(response, "ERR: Emission ON!\r");
+    }
 }
 
 static void ret(char* response)
@@ -538,49 +531,6 @@ static void hila_diag_delay_nvic(void)
     nvic_set_priority(NVIC_TIM5_IRQ, 5);
 }
 
-static void hila_rs485_delay_setup()
-{
-    rcc_periph_clock_enable(RCC_TIM3);
-    timer_set_prescaler(TIM3, 41); // 1MHz timer freq
-}
-
-void hila_rs485_delay(uint16_t us)
-{
-	timer_set_period(TIM3, us);
-    timer_enable_counter(TIM3);
-    while(!timer_get_flag(TIM3, TIM_SR_UIF));
-    timer_clear_flag(TIM3, TIM_SR_UIF);
-}
-
-/**************SYSYTICK STARTS******************/
-volatile uint32_t system_millis;
-
-/* Called when systick fires */
-void sys_tick_handler(void)
-{
-	system_millis++;
-}
-
-/* sleep for delay milliseconds */
-static void msleep(uint32_t delay)
-{
-	uint32_t wake = system_millis + delay;
-	while (wake > system_millis);
-}
-
-/* Set up a timer to create 1mS ticks. */
-static void systick_setup(void)
-{
-	/* clock rate / 1000 to get 1mS interrupt rate */
-	systick_set_reload(84000);
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-	systick_counter_enable();
-	/* this done last */
-	systick_interrupt_enable();
-}
-
-/****************SYSTICK ENDS*************************************/ 
-
 static void hila_rs485_initialize(uint32_t baud)
 {
     // enable clock for usart1 peripheral
@@ -627,7 +577,6 @@ void hila_rs485_puts(char *text)
     uint32_t usart_stat;
 
     length = strlen(text);
-    msleep(1);
     hila_set_rs485_direction(1); // switch to transmitter mode
     for(int i = 0; i < 2000; i++);
     // // if it is the first byte that wait for TXE = 1 and switch the direction to transmitter
@@ -795,20 +744,19 @@ void hila_initialize(void)
     hila_test_initialize();
     // printf("HILA Emulator Diagnostics Port\r\n"); // to be removed
     // hila_test_puts("HILA Emulator Test Port ---> ");
-    hila_test_puts("This port is used to inject commands to force HILA errors\r\n");
+    // hila_test_puts("This port is used to inject commands to force HILA errors\r\n");
     hila_diag_delay_timer_setup();
     hila_diag_delay_nvic();
     hila_rs485_nvic_setup();
     hila_diag_nvic_setup();
     hila_test_nvic_setup();
     hila_timeout_setup();    
-    systick_setup();
 
     //MVUR
     timer_disable_counter(TIM2);
     timer_disable_irq(TIM2, TIM_DIER_UIE);
 
-    hila_rs485_delay_setup();
+    delay_setup();
     //MVUR
 
     hila_timeout_nvic();    
@@ -970,6 +918,7 @@ void hila_rs485_cmd_execute(void)
         bcmd(rs485_resp_buffer);
     }
     
+
     hila_rs485_puts(rs485_resp_buffer);
     
     rs485_cmd_idx = 0;
@@ -991,7 +940,9 @@ void hila_diag_cmd_execute(void)
     {
         stop();
     }
-
+    int hebele;
+    for (hebele = 0; hebele < 10e6; hebele++);
+    //delay_us(1000);
     hila_diag_puts(diag_resp_buffer);
     hila_diag_resp_buf_flush();
     diag_cmd_idx = 0;
@@ -1227,7 +1178,6 @@ void tim2_isr(void)
     hila_rs485_cmd_buf_flush();
     isTimedOut = true;
     timeout_counter++;
-    hila_rs485_resp_buf_flush();
 }
 
 void usart1_isr(void)
@@ -1299,33 +1249,49 @@ void usart1_isr(void)
 //     }   
 // }
 
-void usart3_isr(void)
-{   
-    if (usart_get_flag(USART3, USART_SR_RXNE) == 1)
-    {
-        test_cmd_buffer[test_cmd_idx] = toupper((char)usart_recv(USART3));
-        if (test_cmd_buffer[test_cmd_idx] == '\r')
-        {
-            test_cmd_isReceived = true;
-            test_cmd_buffer[test_cmd_idx] = '\0';
+// void usart3_isr(void)
+// {   
+//     if (usart_get_flag(USART3, USART_SR_RXNE) == 1)
+//     {
+//         test_cmd_buffer[test_cmd_idx] = toupper((char)usart_recv(USART3));
+//         if (test_cmd_buffer[test_cmd_idx] == '\r')
+//         {
+//             test_cmd_isReceived = true;
+//             test_cmd_buffer[test_cmd_idx] = '\0';
 
-            if (test_cmd_isOverflow == true)
-            {
-                test_cmd_buffer[0] = '\0';
-            }
-        }
-        else
-        {
-            test_cmd_idx++;
-            if (test_cmd_idx >= TEST_BUF_SIZE)
-            {
-                test_cmd_idx = TEST_BUF_SIZE - 1;
-                test_cmd_isOverflow = true;
-            }
-        }
-    }   
+//             if (test_cmd_isOverflow == true)
+//             {
+//                 test_cmd_buffer[0] = '\0';
+//             }
+//         }
+//         else
+//         {
+//             test_cmd_idx++;
+//             if (test_cmd_idx >= TEST_BUF_SIZE)
+//             {
+//                 test_cmd_idx = TEST_BUF_SIZE - 1;
+//                 test_cmd_isOverflow = true;
+//             }
+//         }
+//     }   
+// }
+
+void delay_setup(void)
+{
+	/* set up a microsecond free running timer for ... things... */
+	rcc_periph_clock_enable(RCC_TIM6);
+	/* microsecond counter */
+	timer_set_prescaler(TIM6, rcc_apb1_frequency / 1000000 - 1);
+	timer_set_period(TIM6, 0xffff);
+	timer_one_shot_mode(TIM6);
 }
 
-
-
+void delay_us(uint16_t us)
+{
+	TIM_ARR(TIM6) = us;
+	TIM_EGR(TIM6) = TIM_EGR_UG;
+	TIM_CR1(TIM6) |= TIM_CR1_CEN;
+	//timer_enable_counter(TIM6);
+	while (TIM_CR1(TIM6) & TIM_CR1_CEN);
+}
 
