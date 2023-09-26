@@ -6,7 +6,7 @@
 #define PRESCALER 41
 
 #define RS485_BAUDRATE  57600
-#define DIAG_BAUDRATE   28800
+#define DIAG_BAUDRATE   115200
 
 #define RS485_BUF_SIZE  32
 #define TEST_BUF_SIZE   32
@@ -17,7 +17,8 @@
 #define HILA_TEMPERATURE_WAR  48
 #define HILA_TEMPERATURE_ERR  50       
 
-#define HILA_MK2_MODEL_NUM  "YLM-50-ASML\r"
+#define HILA_MK2_MODEL_NUM  "RMN: YLM-50-ASML\r"
+#define HILA_MK2_RFV        "RFV: 32.7.86;2.91;ND\r"
 #define HILA_MK2_SERIAL_NUM "12345678\r"
 
 // hila status register bit definitions
@@ -25,7 +26,8 @@
 #define HILA_STA_OVERHEAT       (1 << 1)    // 2
 #define HILA_STA_EMISSION       (1 << 2)    // 4
 #define HILA_STA_BACK_REFLECT   (1 << 3)    // 8
-#define HILA_STA_NOPOWER        (1 << 11)   // 2048
+#define HILA_STA_NOPOWER        (1 << 11)   // 0
+//#define HILA_STA_NOPOWER        (1 << 11)   // 2048
 #define HILA_STA_MODULATION     (1 << 12)   // 4096
 #define HILA_STA_PSU_FAILURE    (1 << 19)   // 524288
 #define HILA_STA_LOW_TEMP       (1 << 24)   // 16777216
@@ -41,10 +43,10 @@
 #define HILA_DIAG_DELAY_TICKS   10
 
 // HILA power equation coefficients
-#define HILA_COEFF_A    0.5
-#define HILA_COEFF_B    0
+#define HILA_COEFF_A    0.54444
+#define HILA_COEFF_B   -4.44444
 
-#define HILA_DISCHARGE_TIME 25 // hila discharge time must be below 50 ms
+#define HILA_DISCHARGE_TIME 5 // hila discharge time must be below 50 ms
 
 
 #define HILA_ID  0
@@ -78,5 +80,9 @@ extern void hila_test_cmd_execute(void);
 // extern void _delay_ms(uint32_t duration);
 
 extern int _write(int file, char *ptr, int len);
+
+extern void test_func(void);
+extern void delay_setup(void);
+extern void delay_us(uint16_t us);
 
 #endif
