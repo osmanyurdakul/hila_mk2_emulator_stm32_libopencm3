@@ -735,19 +735,19 @@ static void hila_test_initialize(void)
 {
     // enable clock for usart gpios
     rcc_periph_clock_enable(RCC_GPIOC);
-    rcc_periph_clock_enable(RCC_GPIOB);
+    // rcc_periph_clock_enable(RCC_GPIOB);
     // // set alternate function for PC10: USART3_TX and PC11: USART3_RX
-    // gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
-    // gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO11);
-    gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO5);
-    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
+    gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
+    gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO11);
+    // gpio_mode_setup(GPIOC, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO5);
+    // gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO10);
     // set alternate mode as AF7
-    gpio_set_af(GPIOC, GPIO_AF7, GPIO5);
-    gpio_set_af(GPIOB, GPIO_AF7, GPIO10);
+    gpio_set_af(GPIOC, GPIO_AF7, GPIO11);
+    gpio_set_af(GPIOC, GPIO_AF7, GPIO10);
     // enable clock for usart3 peripheral
     rcc_periph_clock_enable(RCC_USART3);
     // set baudrate
-    usart_set_baudrate(USART3, 9600);
+    usart_set_baudrate(USART3, 115200);
     // data bit:8, stop bit:1, flow control:none, parity:none
     usart_set_databits(USART3, 8);
     usart_set_stopbits(USART3, USART_STOPBITS_1);
@@ -793,8 +793,8 @@ void hila_initialize(void)
     hila_rs485_initialize(RS485_BAUDRATE);
     hila_diag_initialize(DIAG_BAUDRATE);
     hila_test_initialize();
-    // printf("HILA Emulator Diagnostics Port\r\n"); // to be removed
-    // hila_test_puts("HILA Emulator Test Port ---> ");
+    printf("HILA Emulator Diagnostics Port\r\n"); // to be removed
+    hila_test_puts("HILA Emulator Test Port ---> ");
     hila_test_puts("This port is used to inject commands to force HILA errors\r\n");
     hila_diag_delay_timer_setup();
     hila_diag_delay_nvic();
@@ -1120,6 +1120,8 @@ void hila_test_cmd_execute(void)
             hila_critical_err_counter++;
         }
     }
+
+    hila_test_puts(test_cmd_buffer);
 
     test_cmd_idx = 0;
     test_cmd_buffer[0] = 0;
