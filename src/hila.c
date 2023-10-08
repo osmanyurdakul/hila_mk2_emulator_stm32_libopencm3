@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include "ftoa.h"
+#include "isdigit.h"
 #include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
@@ -62,6 +63,12 @@ bool hila_diag_isEnabled            = false;
 int hila_diag_delay                 = -1;
 int hila_sdc_counter                = 0;
 int hila_critical_err_counter       = 0;
+char* hila_firmware_version         = HILA_MK2_FV;
+char* hila_model_name               = HILA_MK2_MODEL_NAME;
+bool hila_setget_error              = false;
+bool hila_setack_error              = false;
+bool hila_setoor_error              = false;
+
 
 
 // MCU related variables
@@ -84,7 +91,7 @@ static void hila_calc_output_power(void)
         output_power = 0.0;
     }
 
-    if (hila_lifetime_eol == 0) // no end of life error/warning
+    if  (hila_lifetime_eol == 0)// no end of life error/warning
     {
         if (hila_status_register & HILA_STA_EMISSION)
         {
@@ -95,6 +102,7 @@ static void hila_calc_output_power(void)
             hila_output_power_register = 0.0;
         }
     }
+
     else if (hila_lifetime_eol == 1) // end of life warning
     {
         if (hila_status_register & HILA_STA_EMISSION)
@@ -112,33 +120,54 @@ static void hila_calc_output_power(void)
         if (hila_status_register & HILA_STA_EMISSION)
         {
             hila_output_power_register = output_power - (output_power * 0.35);
+            hila_status_register |= HILA_STA_CRITICAL_ERR;
+            hila_critical_err_counter++;
+            hila_error_flag = true;
         }
         else
         {
             hila_output_power_register = 0.0;
         }
     }
-    
+        
 }
 
 static void sdc(char* response)
 {
     char str[8];
     float setpoint = atof(rs485_command_parameter); // convert string argument into a floating point number
-    if (setpoint == 0 ) {
+
+    if(hila_setoor_error == true)
+    {
+        setpoint = 101.0;
+    }
+
+    if (setpoint == 0) 
+    {
         sprintf(response, "SDC: 0.0\r"); 
         hila_setpoint_register = 0.0;
-    } else if (setpoint < reg_setpoint_min || setpoint > 100.0) {
+    } 
+    else if (setpoint < reg_setpoint_min || setpoint > 100.0) 
+    {
         sprintf(response, "ERR: Argument out of range\r");
-        
-    } else {
-        if (setpoint < 9.995)
+    } 
+    else 
+    {
+        if (hila_setack_error == true)
         {
-            hila_setpoint_register = ftoa_2dec(setpoint, str);
+            (void)ftoa_1dec(setpoint + 0.25, str); // if setpoint acknowledgement error triggered via test interface
         }
         else
         {
-            hila_setpoint_register = ftoa_1dec(setpoint, str);
+            if (setpoint < 9.995)
+            {
+                hila_setpoint_register = ftoa_2dec(setpoint, str);
+                
+            }
+            else
+            {
+                hila_setpoint_register = ftoa_1dec(setpoint, str);
+            }
         }
         sprintf(response, "SDC: %s\r", str); 
     }
@@ -149,7 +178,16 @@ static void sdc(char* response)
 static void rcs(char* response)
 {
     char str[8];
-    (void)ftoa_2dec(hila_setpoint_register, str); // float to ascii/string
+    float hila_current_setpoint;
+    if (hila_setget_error == 0)
+    {
+        hila_current_setpoint = hila_setpoint_register;
+    }
+    else // if there is a setget error forced by test interface
+    {
+        hila_current_setpoint = 0.0;
+    }
+    (void)ftoa_2dec(hila_current_setpoint, str); // float to ascii/string
     sprintf(response, "RCS: %s\r", str); // sprintf has some problem with %f that's why it is needed to convert float into string/ascii
 }
 
@@ -204,15 +242,15 @@ static void ricdt(char* response)
 {
     sprintf(response, "RICDT: %d\r", hila_disch_time);
 
-    if (hila_disch_time > 50)
-    {
-        hila_status_register |= HILA_STA_CRITICAL_ERR; // status register critical error, discharge time is longer than it should be.
-        hila_critical_err_counter++;
-    }
-    else
-    {
-        hila_status_register &= ~HILA_STA_CRITICAL_ERR; // discharge time is OK. normal operation
-    }
+    // if (hila_disch_time > 50)
+    // {
+    //     hila_status_register |= HILA_STA_CRITICAL_ERR; // status register critical error, discharge time is longer than it should be.
+    //     hila_critical_err_counter++;
+    // }
+    // else
+    // {
+    //     hila_status_register &= ~HILA_STA_CRITICAL_ERR; // discharge time is OK. normal operation
+    // } 
 }
 
 static void rerr(char* response)
@@ -223,12 +261,12 @@ static void rerr(char* response)
 
 static void rmn(char* response)
 {
-    sprintf(response, HILA_MK2_MODEL_NUM);
+    sprintf(response, hila_model_name);
 }
 
 static void rfv(char* response)
 {
-    sprintf(response, HILA_MK2_RFV);
+    sprintf(response, hila_firmware_version);
 }
 
 
@@ -679,8 +717,8 @@ static void hila_diag_initialize(uint32_t baud)
     usart_set_parity(USART2, USART_PARITY_NONE);
     // enable tx and rx 
     usart_set_mode(USART2, USART_MODE_TX_RX);
-    // enable rx interrupt
-    usart_enable_rx_interrupt(USART2);
+    // // enable rx interrupt
+    // usart_enable_rx_interrupt(USART2);
     // enable usart module
     usart_enable(USART2);
 }
@@ -842,13 +880,6 @@ void hila_rs485_cmd_execute(void)
 
     if (!strcmp((const char*)rs485_command, "SDC"))
     {
-        // if (rs485_cmd_buffer[3] == 32)
-        // {
-        //     for(hila_cmd_arg_idx = 0; hila_cmd_arg_idx < strlen((const char*)rs485_cmd_buffer); hila_cmd_arg_idx++)
-        //     {
-        //         hila_cmd_argument[hila_cmd_arg_idx] = rs485_cmd_buffer[hila_cmd_arg_idx + 4];
-        //     }
-        // }
         sdc(rs485_resp_buffer); // call set diode current function
         if ((hila_status_register & HILA_STA_EMISSION) == HILA_STA_EMISSION)
         {
@@ -862,7 +893,6 @@ void hila_rs485_cmd_execute(void)
             
             
             (void)ftoa_2dec(p_out, str);
-            //printf("HILA-%d: %s W\r\n", HILA_ID, str);
             hila_diag_puts(str);
             hila_diag_putc('\r');
         }
@@ -1003,8 +1033,12 @@ void hila_diag_cmd_execute(void)
 void hila_test_cmd_execute(void)
 {
     sscanf((char*)test_cmd_buffer, "%s %s", test_command, test_command_parameter_str);
-    test_command_parameter = atoi(test_command_parameter_str);
 
+    if (is_digit(test_command_parameter_str) == 1)
+    {
+        test_command_parameter = atoi(test_command_parameter_str);
+    }
+    
     if (!strcmp((const char*)test_command, "TEST"))
     {
         hila_diag_puts("Port is functional\r\n");
@@ -1012,6 +1046,13 @@ void hila_test_cmd_execute(void)
     else if (!strcmp((const char*)test_command, "SICDT"))
     {
         hila_disch_time = test_command_parameter;
+
+        if (test_command_parameter > 50)
+        {
+            hila_status_register |= HILA_STA_CRITICAL_ERR;
+            hila_critical_err_counter++;
+            hila_error_flag = true;
+        }
     }
     else if (!strcmp((const char*)test_command, "STA")) // Test error LED behavior for each error case!!!
     {
@@ -1087,7 +1128,7 @@ void hila_test_cmd_execute(void)
                 hila_error_flag = false;
                 break;
             case 25:
-                hila_status_register &= ~HILA_STA_PSU_FAILURE;
+                hila_status_register &= ~HILA_STA_SUPPLY_ALARM;
                 hila_error_flag = false;
                 break;
             case 26:
@@ -1102,23 +1143,104 @@ void hila_test_cmd_execute(void)
     else if (!strcmp((const char*)test_command, "SCT"))
     {
         hila_laser_temp = test_command_parameter;
+
+        if (test_command_parameter > 55)
+        {
+            hila_status_register |= HILA_STA_OVERHEAT;
+            hila_error_flag = true;
+        }
+
+        else if (test_command_parameter < 55)
+        {
+            hila_status_register &= ~HILA_STA_OVERHEAT;
+            hila_error_flag = false;
+        }
+        
     }
     else if (!strcmp((const char*)test_command, "EOL"))
     {
-        if (test_command_parameter == 0) // end of life: none
-        {
-            hila_lifetime_eol = 0;
-        }
-        else if (test_command_parameter == 1) // end of life: warning
+        if (test_command_parameter == 1) // end of life: warning
         {
             hila_lifetime_eol = 1;
         }
         else if (test_command_parameter == 2) // end of life: error
         {
             hila_lifetime_eol = 2;
-            hila_status_register |= HILA_STA_CRITICAL_ERR;
-            hila_critical_err_counter++;
         }
+        else
+        {
+            hila_lifetime_eol = 0;
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "FVM")) // firmware version mismatch
+    {
+        if (test_command_parameter == 1)
+        {
+            strcpy(hila_firmware_version, HILA_FAKE_FV);
+        }
+        else
+        {
+            strcpy(hila_firmware_version, HILA_MK2_FV);
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "MNM")) // model name mismatch
+    {
+        if (test_command_parameter == 1)
+        {
+            strcpy(hila_model_name, HILA_MODEL_NAME);
+        }
+        else
+        {
+            strcpy(hila_model_name, HILA_MK2_MODEL_NAME);
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "SETGET")) // current setpoint error
+    {
+        if (test_command_parameter = 1)
+        {
+            hila_setget_error = true;
+        }
+        else
+        {
+            hila_setget_error = false;
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "SETACK")) // setpoint ack error
+    {
+        if (test_command_parameter = 1)
+        {
+            hila_setack_error = true;
+        }
+        else
+        {
+            hila_setack_error = false;
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "SETOOR")) // setpoint out of range >100% or <minimum setpoint
+    {
+        if (test_command_parameter = 1)
+        {
+            hila_setoor_error = true;
+        }
+        else
+        {
+            hila_setoor_error = false;
+        }
+    }
+
+    else if (!strcmp((const char*)test_command, "RCE")) // HILA response communication error
+    {
+        
+    }
+
+    else if (!strcmp((const char*)test_command, "RTE")) // HILA response timeout error
+    {
+        
     }
 
     hila_test_puts(test_cmd_buffer);
@@ -1143,6 +1265,10 @@ static void hila_handle_led(void)
         if (hila_error_flag == true)
         {
             hila_set_error_led(1); // error led turns to red
+        }
+        else if (hila_error_flag == false)
+        {
+             hila_set_error_led(0); // error led turns to green
         }
     }
     else
