@@ -1097,7 +1097,7 @@ void hila_test_cmd_execute(void)
             default:
                 break;
         } 
-           
+
     }
     else if (!strcmp((const char*)test_command, "SCT"))
     {
